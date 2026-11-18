@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VR Moving Room — HLSC 4025</title>
+<style>
+  :root{ --surface:#fcfcfb; --line:#e4e3df; --text:#0b0b0b; --text2:#52514e; --muted:#8a8984; --head:#2a78d6; --room:#8a8984; --ok:#0ca30c; --warn:#b77900; }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--surface);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:1050px;margin:0 auto;padding:26px 30px 60px}
+  h1{font-size:30px;margin:0 0 6px} h2{font-size:21px;margin:0 0 10px}
+  p,li{line-height:1.5;color:var(--text2)} p{margin:8px 0}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--text);padding:12px 18px;font-size:17px}
+  button.primary{background:var(--text);color:#fff;border-color:var(--text)}
+  button.big{font-size:22px;padding:16px 30px}
+  button:disabled{opacity:.4;cursor:default}
+  button.danger{color:#b3261e}
+  label{display:block;font-size:14px;color:var(--text2);margin:12px 0 6px}
+  input,select{font:inherit;font-size:16px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;width:100%}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:0 20px}
+  .small{font-size:14px} .muted{color:var(--muted)}
+  .flag-ok{color:var(--ok);font-weight:600} .flag-warn{color:var(--warn);font-weight:600}
+  table{border-collapse:collapse;width:100%;font-size:15px}
+  th,td{text-align:right;padding:7px 9px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th.l,td.l{text-align:left} th{color:var(--text2);font-weight:600}
+  tr.sel td{background:#f3f7fd}
+  .keys td{text-align:left;padding:5px 9px} .keys td:first-child{font-weight:600;white-space:nowrap;width:210px}
+  .legend{display:flex;gap:18px;font-size:14px;color:var(--text2);margin:4px 0}
+  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+  .stats{display:flex;gap:28px;flex-wrap:wrap;margin:4px 0 8px}
+  .stat .v{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums} .stat .k{font-size:13px;color:var(--text2)}
+  #previewWrap{position:fixed;inset:0;background:#000;display:none;z-index:10}
+  #previewWrap canvas{width:100%;height:100%;display:block}
+  #previewBar{position:absolute;left:12px;top:12px;color:#ddd;font-size:14px;background:rgba(0,0,0,.6);padding:8px 12px;border-radius:8px;line-height:1.5}
+  #previewExit{position:absolute;right:12px;top:12px;font-size:14px;padding:8px 12px}
+  textarea{width:100%;height:120px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;display:none;margin-top:8px}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<main>
+  <h1>VR Moving Room</h1>
+  <p>HLSC 4025 · A virtual version of Lee &amp; Aronson’s (1974) moving room for the Meta Quest. The walls and ceiling of a dotted room move slowly toward and away from the participant while the floor stays still. The headset records how the participant’s head sways, so you can see whether the body follows the room.</p>
+  <p id="xrStatus" class="small"></p>
+
+  <div class="card">
+    <h2>1 · Settings</h2>
+    <div class="grid3">
+      <div><label>Room frequency (Hz)</label><input id="sFreq" type="number" step="0.01" min="0.05" max="0.8"></div>
+      <div><label>Room amplitude (cm, each way)</label><input id="sAmp" type="number" step="1" min="1" max="60"></div>
+      <div><label>Trial length (s)</label><input id="sDur" type="number" step="5" min="10" max="300"></div>
+      <div><label>What moves</label><select id="sWhat"><option value="walls">Walls and ceiling (floor still)</option><option value="all">Whole room, including floor</option></select></div>
+      <div><label>Distance to front wall (m)</label><input id="sFront" type="number" step="0.1" min="0.8" max="4"></div>
+      <div><label>Fixation dot on the front wall</label><select id="sFix"><option value="0">Off</option><option value="1">On</option></select></div>
+    </div>
+    <p class="small muted">Defaults: 0.20 Hz (one cycle every 5 s), 15 cm, 60 s. Frequency and amplitude can also be changed from the controller while in VR.</p>
+  </div>
+
+  <div class="card">
+    <h2>2 · Run it</h2>
+    <div class="row">
+      <button id="bVR" class="primary big" disabled>Enter VR</button>
+      <button id="bPreview">Preview on this screen</button>
+    </div>
+    <p class="small" style="margin-top:12px"><b>Before entering VR:</b> set the headset’s boundary to <b>stationary</b>, have a spotter stand behind the participant, and keep a chair nearby. Stop right away if the participant feels dizzy or sick.</p>
+    <h2 style="margin-top:18px;font-size:17px">Controller buttons (either controller, held by the experimenter)</h2>
+    <table class="keys small">
+      <tr><td>Trigger</td><td>Start a trial (3-s countdown, then beep) · press again to stop early</td></tr>
+      <tr><td>A or X</td><td>Change condition: still → moving → moving, resist → still</td></tr>
+      <tr><td>B or Y</td><td>Re-center the room in front of the participant (do this once they are standing still, facing forward)</td></tr>
+      <tr><td>Thumbstick up / down</td><td>Amplitude ± 1 cm</td></tr>
+      <tr><td>Thumbstick left / right</td><td>Frequency ± 0.02 Hz</td></tr>
+      <tr><td>Meta button / take off headset</td><td>Leave VR and see the results on this page</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>3 · Results</h2>
+    <div id="results"><p class="muted">No trials yet. Trials recorded in VR appear here when you leave VR.</p></div>
+  </div>
+</main>
+
+<div id="previewWrap"><div id="previewBar"></div><button id="previewExit">Exit preview (Esc)</button></div>
+
+<script type="module">
+import * as THREE from "three";
+const $ = id => document.getElementById(id);
+const KEY = "hlsc4025.vrMovingRoom.v1";
+const DEF = { freq:0.20, ampCm:15, dur:60, what:"walls", front:2.0, fix:0, countIn:3 };
+let S = {...DEF};
+try { Object.assign(S, JSON.parse(localStorage.getItem(KEY+".settings")||"{}")); } catch(e){}
+const saveS = () => { try { localStorage.setItem(KEY+".settings", JSON.stringify(S)); } catch(e){} };
+let trials = [];
+try { trials = JSON.parse(localStorage.getItem(KEY+".trials")||"[]"); } catch(e){ trials = []; }
+const saveTrials = () => { try { localStorage.setItem(KEY+".trials", JSON.stringify(trials)); } catch(e){} };
+
+/* ---------------- settings form ---------------- */
+function fillForm(){ $("sFreq").value=S.freq; $("sAmp").value=S.ampCm; $("sDur").value=S.dur; $("sWhat").value=S.what; $("sFront").value=S.front; $("sFix").value=String(S.fix); }
+function readForm(){
+  const c=(v,a,b,d)=>{ v=+v; return isFinite(v)?Math.min(b,Math.max(a,v)):d; };
+  S.freq=c($("sFreq").value,0.05,0.8,DEF.freq); S.ampCm=c($("sAmp").value,1,60,DEF.ampCm); S.dur=c($("sDur").value,10,300,DEF.dur);
+  S.what=$("sWhat").value; S.front=c($("sFront").value,0.8,4,DEF.front); S.fix=+$("sFix").value; saveS();
+}
+["sFreq","sAmp","sDur","sWhat","sFront","sFix"].forEach(id => $(id).addEventListener("change", () => { readForm(); buildRoom(); }));
+fillForm();
+
+/* ---------------- scene ---------------- */
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06070a);
+const camera = new THREE.PerspectiveCamera(80, 16/9, 0.05, 50);
+camera.position.set(0, 1.6, 0);
+
+const world = new THREE.Group();   // placed at the participant's position/heading by re-centering
+scene.add(world);
+const room = new THREE.Group();    // the part that moves
+world.add(room);
+let floorMesh = null, hud = null, fixDot = null;
+
+function dotTexture(seed, bg, fg, n, rMin, rMax){
+  let s = seed; const rnd = () => (s = (s*16807) % 2147483647) / 2147483647;
+  const c = document.createElement("canvas"); c.width = c.height = 1024;
+  const g = c.getContext("2d"); g.fillStyle = bg; g.fillRect(0,0,1024,1024); g.fillStyle = fg;
+  for (let i=0;i<n;i++){ const x=rnd()*1024, y=rnd()*1024, r=rMin+rnd()*(rMax-rMin);
+    for (const dx of [-1024,0,1024]) for (const dy of [-1024,0,1024]) { g.beginPath(); g.arc(x+dx,y+dy,r,0,6.2832); g.fill(); } }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t;
+}
+const TILE = 1.5; // metres per texture tile
+function plane(w, h, tex, mat){
+  const tx = tex.clone(); tx.needsUpdate = true; tx.repeat.set(w/TILE, h/TILE);
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tx, side: THREE.FrontSide, ...(mat||{}) }));
+}
+function buildRoom(){
+  room.clear(); if (floorMesh){ floorMesh.parent && floorMesh.parent.remove(floorMesh); floorMesh = null; }
+  const W = 4, H = 3, F = S.front, BK = 2.5, L = F + BK;
+  const wallTex = dotTexture(7, "#15171c", "#d9dde6", 260, 5, 14);
+  const ceilTex = dotTexture(11, "#101216", "#aeb4c0", 220, 5, 12);
+  const floorTex = dotTexture(23, "#2a2b2e", "#4a4c51", 500, 3, 9);
+  const front = plane(W, H, wallTex); front.position.set(0, H/2, -F); room.add(front);
+  const back = plane(W, H, wallTex); back.rotation.y = Math.PI; back.position.set(0, H/2, BK); room.add(back);
+  const left = plane(L, H, wallTex); left.rotation.y = Math.PI/2; left.position.set(-W/2, H/2, (BK-F)/2); room.add(left);
+  const right = plane(L, H, wallTex); right.rotation.y = -Math.PI/2; right.position.set(W/2, H/2, (BK-F)/2); room.add(right);
+  const ceil = plane(W, L, ceilTex); ceil.rotation.x = Math.PI/2; ceil.position.set(0, H, (BK-F)/2); room.add(ceil);
+  // floor: slightly larger than the room so its edges never show when the walls move
+  floorMesh = plane(W+1.5, L+1.5, floorTex); floorMesh.rotation.x = -Math.PI/2; floorMesh.position.set(0, 0, (BK-F)/2);
+  (S.what === "all" ? room : world).add(floorMesh);
+  fixDot = new THREE.Mesh(new THREE.CircleGeometry(0.025, 24), new THREE.MeshBasicMaterial({ color: 0xd33a2c }));
+  fixDot.position.set(0, 1.5, -F + 0.005); fixDot.visible = !!S.fix; room.add(fixDot);
+  if (!hud) makeHud();
+  hud.position.set(0, 1.45, -Math.min(1.2, F - 0.3));
+}
+
+/* HUD: a small text panel in front of the participant, shown only between trials */
+let hudCanvas, hudCtx, hudTex, hudText = "";
+function makeHud(){
+  hudCanvas = document.createElement("canvas"); hudCanvas.width = 1024; hudCanvas.height = 420; hudCtx = hudCanvas.getContext("2d");
+  hudTex = new THREE.CanvasTexture(hudCanvas); hudTex.colorSpace = THREE.SRGBColorSpace;
+  hud = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.295), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true }));
+  world.add(hud);
+}
+function setHud(lines, big){
+  const key = JSON.stringify([lines, big]); if (key === hudText) return; hudText = key;
+  const g = hudCtx; g.clearRect(0,0,1024,420);
+  if (!lines && !big){ hud.visible = false; return; }
+  hud.visible = true;
+  g.fillStyle = "rgba(10,12,16,0.82)"; g.beginPath(); g.roundRect(4,4,1016,412,28); g.fill();
+  g.fillStyle = "#f2f2f2"; g.textAlign = "center";
+  if (big){ g.font = "bold 220px system-ui, sans-serif"; g.fillText(big, 512, 290); }
+  else { lines.forEach((l, i) => { g.font = (i===0 ? "bold 58px " : "40px ") + "system-ui, sans-serif"; g.fillText(l, 512, 92 + i*70); }); }
+  hudTex.needsUpdate = true;
+}
+buildRoom();
+
+/* ---------------- state ---------------- */
+const CONDS = ["still", "moving", "moving, resist"];
+let cond = 1;            // index into CONDS
+let env = 0;             // 0..1 motion envelope (2-s ramps)
+let phase = 0;           // radians
+let roomZ = 0;           // metres, + = room moved FORWARD (away from participant)
+let trial = null;        // running trial
+let lastT = null;
+let origin = null;       // {x, z, fx, fz} participant position and forward direction at re-centering
+let needRecenter = true;
+let mode = null;         // "xr" | "preview"
+
+/* audio */
+let actx = null;
+function audio(){ try { if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); } catch(e){} }
+function beep(f=880, d=0.12, v=0.35){ if (!actx) return; const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.frequency.value = f; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(v,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t+d+0.05); }
+
+function recenter(pos, quat){
+  const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(quat); fwd.y = 0;
+  if (fwd.lengthSq() < 1e-6) fwd.set(0,0,-1);
+  fwd.normalize();
+  origin = { x: pos.x, z: pos.z, fx: fwd.x, fz: fwd.z };
+  world.position.set(pos.x, 0, pos.z);
+  world.rotation.set(0, Math.atan2(-fwd.x, -fwd.z), 0);
+  needRecenter = false;
+  beep(660, 0.08, 0.2);
+}
+
+function startTrial(now){
+  audio();
+  trial = { cond: CONDS[cond], freq: S.freq, ampCm: S.ampCm, dur: S.dur, tCountEnd: now + S.countIn*1000, tEnd: null, started: false, lastCount: null,
+            samples: [], startedAt: new Date().toISOString(), mode };
+}
+function stopTrial(now, reason){
+  if (!trial) return;
+  const t = trial; trial = null;
+  if (t.started){
+    beep(440, 0.45);
+    t.endReason = reason; t.actualDur = (now - t.tStart)/1000;
+    if (t.mode === "xr" && t.samples.length > 50){
+      t.analysis = analyze(t);
+      delete t.tCountEnd; delete t.lastCount;
+      trials.push(t); saveTrials();
+    }
+  }
+}
+function updateTrial(now){
+  if (!trial) return;
+  if (!trial.started){
+    if (now < trial.tCountEnd){
+      const left = Math.ceil((trial.tCountEnd - now)/1000);
+      if (left !== trial.lastCount){ trial.lastCount = left; beep(700, 0.07, 0.25); }
+      setHud(null, String(left)); return;
+    }
+    trial.started = true; trial.tStart = now; trial.tEnd = now + trial.dur*1000;
+    beep(1000, 0.3); setHud(null, null);
+  }
+  if (now >= trial.tEnd) stopTrial(now, "complete");
+}
+function hudIdle(){
+  const lines = [ `Ready · ${CONDS[cond].toUpperCase()}`,
+    `${S.freq.toFixed(2)} Hz · ${Math.round(S.ampCm)} cm · ${S.dur} s`,
+    `Trigger = start · A/X = condition · B/Y = re-center`,
+    `Stick ↑↓ amplitude · ←→ frequency`,
+    trials.length ? `${trials.length} trial${trials.length>1?"s":""} recorded` : (mode==="xr" ? "Stand still, face forward, then press B/Y" : "Preview: no head data is recorded") ];
+  setHud(lines);
+}
+
+/* room motion: same sinusoid as the TV version, with smooth 2-s on/off ramps */
+function stepMotion(now){
+  const dt = lastT === null ? 0 : Math.min(0.1, (now - lastT)/1000); lastT = now;
+  const wantMoving = !!(trial && trial.started && trial.cond !== "still");
+  const target = wantMoving ? 1 : 0;
+  env = target > env ? Math.min(1, env + dt/2) : Math.max(0, env - dt/2);
+  if (env > 0) phase += 2*Math.PI*S.freq*dt; else phase = 0;
+  const e = 0.5 - 0.5*Math.cos(Math.PI*env);
+  roomZ = (S.ampCm/100) * e * Math.sin(phase);
+  room.position.z = -roomZ;         // + roomZ = room moves forward (away), i.e. toward -z in room coordinates
+}
+
+/* ---------------- controllers ---------------- */
+const prevBtn = new Map();
+function pollControllers(session, now){
+  for (const src of session.inputSources){
+    const gp = src.gamepad; if (!gp) continue;
+    const id = src.handedness, prev = prevBtn.get(id) || {};
+    const pressed = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    const edge = (name, val) => { const was = prev[name]; prev[name] = val; return val && !was; };
+    if (edge("trig", pressed(0))) { trial ? stopTrial(now, "stopped") : startTrial(now); }
+    if (!trial){
+      if (edge("a", pressed(4))) { cond = (cond + 1) % CONDS.length; beep(820, 0.05, 0.2); }
+      if (edge("b", pressed(5))) { needRecenter = true; }
+      const ax = gp.axes[2] || 0, ay = gp.axes[3] || 0;
+      if (edge("up", ay < -0.7)) { S.ampCm = Math.min(60, S.ampCm + 1); saveS(); fillForm(); }
+      if (edge("dn", ay > 0.7))  { S.ampCm = Math.max(1, S.ampCm - 1); saveS(); fillForm(); }
+      if (edge("rt", ax > 0.7))  { S.freq = Math.min(0.8, +(S.freq + 0.02).toFixed(2)); saveS(); fillForm(); }
+      if (edge("lt", ax < -0.7)) { S.freq = Math.max(0.05, +(S.freq - 0.02).toFixed(2)); saveS(); fillForm(); }
+    } else { ["a","b","up","dn","rt","lt"].forEach(k => prev[k] = true); }
+    prevBtn.set(id, prev);
+  }
+}
+
+/* ---------------- XR loop ---------------- */
+const tmpP = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+function onXRFrame(time, frame){
+  const session = renderer.xr.getSession();
+  if (frame && session){
+    const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
+    if (pose){
+      const p = pose.transform.position, o = pose.transform.orientation;
+      tmpP.set(p.x, p.y, p.z); tmpQ.set(o.x, o.y, o.z, o.w);
+      if (needRecenter) recenter(tmpP, tmpQ);
+      pollControllers(session, time);
+      stepMotion(time);
+      updateTrial(time);
+      if (trial && trial.started && origin){
+        const dx = p.x - origin.x, dz = p.z - origin.z;
+        const ap = dx*origin.fx + dz*origin.fz;           // + = forward
+        const ml = dx*(-origin.fz) + dz*origin.fx;        // + = to the right
+        trial.samples.push([Math.round(time - trial.tStart), +(ap*1000).toFixed(1), +(ml*1000).toFixed(1), +(p.y*1000).toFixed(1), +(roomZ*1000).toFixed(1)]);
+      }
+      if (!trial) hudIdle();
+    }
+  }
+  renderer.render(scene, camera);
+}
+
+async function enterVR(){
+  readForm(); buildRoom(); audio();
+  try {
+    const session = await navigator.xr.requestSession("immersive-vr", { optionalFeatures: ["local-floor", "bounded-floor"] });
+    mode = "xr"; needRecenter = true; lastT = null;
+    session.addEventListener("end", () => {
+      if (trial) stopTrial(performance.now(), "left VR");
+      mode = null; renderer.setAnimationLoop(null); env = 0; roomZ = 0; room.position.z = 0;
+      showResults(trials.length - 1);
+    });
+    await renderer.xr.setSession(session);
+    renderer.setAnimationLoop(onXRFrame);
+  } catch(e){
+    $("xrStatus").innerHTML = `<span class="flag-warn">Could not start VR: ${e.message}</span>`;
+  }
+}
+
+/* ---------------- preview on a normal screen ---------------- */
+const pw = $("previewWrap");
+function enterPreview(){
+  readForm(); buildRoom(); audio();
+  mode = "preview"; needRecenter = false; origin = {x:0,z:0,fx:0,fz:-1}; world.position.set(0,0,0); world.rotation.set(0,0,0);
+  pw.style.display = "block"; pw.prepend(renderer.domElement);
+  const resize = () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); };
+  resize(); addEventListener("resize", resize);
+  lastT = null;
+  renderer.setAnimationLoop(time => {
+    stepMotion(time); updateTrial(time); if (!trial) hudIdle();
+    $("previewBar").innerHTML = `Preview · ${CONDS[cond]} · ${S.freq.toFixed(2)} Hz · ${Math.round(S.ampCm)} cm${trial && trial.started ? ` · ${Math.floor((time-trial.tStart)/1000)} / ${S.dur} s` : ""}<br>` +
+      `<span style="color:#999">Space start/stop · C condition · ↑↓ amplitude · ←→ frequency · no head data in preview</span>`;
+    renderer.render(scene, camera);
+  });
+}
+function exitPreview(){ if (mode !== "preview") return; if (trial) stopTrial(performance.now(), "stopped"); renderer.setAnimationLoop(null); mode = null; pw.style.display = "none"; env = 0; room.position.z = 0; }
+$("previewExit").onclick = exitPreview;
+addEventListener("keydown", e => {
+  if (mode !== "preview") return;
+  const now = performance.now();
+  if (e.key === "Escape") exitPreview();
+  else if (e.key === " "){ e.preventDefault(); trial ? stopTrial(now, "stopped") : startTrial(now); }
+  else if (!trial && e.key.toLowerCase() === "c") cond = (cond + 1) % CONDS.length;
+  else if (!trial && e.key === "ArrowUp"){ S.ampCm = Math.min(60, S.ampCm+1); fillForm(); }
+  else if (!trial && e.key === "ArrowDown"){ S.ampCm = Math.max(1, S.ampCm-1); fillForm(); }
+  else if (!trial && e.key === "ArrowRight"){ S.freq = Math.min(0.8, +(S.freq+0.02).toFixed(2)); fillForm(); }
+  else if (!trial && e.key === "ArrowLeft"){ S.freq = Math.max(0.05, +(S.freq-0.02).toFixed(2)); fillForm(); }
+});
+$("bPreview").onclick = enterPreview;
+$("bVR").onclick = enterVR;
+
+/* ---------------- analysis ----------------
+   Fit head AP sway and room position to a sinusoid at the room frequency (plus offset and drift):
+   gain = head amplitude / room amplitude at that frequency; phase lag = how far the head lags the room. */
+function fitSine(ts, ys, f){
+  // columns: sin, cos, 1, t  → solve normal equations (4x4)
+  const n = ts.length, X = [], A = Array.from({length:4},()=>Array(4).fill(0)), b = Array(4).fill(0);
+  for (let i=0;i<n;i++){ const t = ts[i]/1000, w = 2*Math.PI*f*t, r = [Math.sin(w), Math.cos(w), 1, t];
+    for (let j=0;j<4;j++){ b[j] += r[j]*ys[i]; for (let k=0;k<4;k++) A[j][k] += r[j]*r[k]; } }
+  // Gaussian elimination
+  for (let c=0;c<4;c++){ let p=c; for (let r=c+1;r<4;r++) if (Math.abs(A[r][c])>Math.abs(A[p][c])) p=r;
+    [A[c],A[p]]=[A[p],A[c]]; [b[c],b[p]]=[b[p],b[c]]; const d=A[c][c]||1e-12;
+    for (let r=0;r<4;r++){ if (r===c) continue; const m=A[r][c]/d; for (let k=c;k<4;k++) A[r][k]-=m*A[c][k]; b[r]-=m*b[c]; } }
+  const s = b[0]/A[0][0], c = b[1]/A[1][1];
+  return { amp: Math.hypot(s, c), ph: Math.atan2(c, s) };
+}
+function analyze(t){
+  const sm = t.samples.filter(r => r[0] >= 5000 || t.dur < 20);   // skip the first 5 s (motion ramps up)
+  const ts = sm.map(r=>r[0]), ap = sm.map(r=>r[1]), ml = sm.map(r=>r[2]), rz = sm.map(r=>r[4]);
+  const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
+  const rms = a => { const m = mean(a); return Math.sqrt(mean(a.map(v=>(v-m)**2))); };
+  const head = fitSine(ts, ap, t.freq), rm = fitSine(ts, rz, t.freq);
+  let lag = (rm.ph - head.ph) * 180/Math.PI; lag = ((lag + 540) % 360) - 180;
+  const dts = []; for (let i=1;i<t.samples.length;i++) dts.push(t.samples[i][0]-t.samples[i-1][0]);
+  return { apRms: rms(ap)/10, mlRms: rms(ml)/10, headAtF: head.amp/10, roomAtF: rm.amp/10,
+           gain: rm.amp > 1 ? head.amp/rm.amp : null, lagDeg: rm.amp > 1 ? lag : null,
+           hz: dts.length ? 1000/(dts.reduce((a,b)=>a+b,0)/dts.length) : null, n: t.samples.length };
+}
+
+/* ---------------- results page ---------------- */
+let sel = -1;
+const fmt = (v,d=1) => (v===null || v===undefined || !isFinite(v)) ? "—" : v.toFixed(d);
+function showResults(i){
+  if (!trials.length){ $("results").innerHTML = `<p class="muted">No trials yet. Trials recorded in VR appear here when you leave VR.</p>`; return; }
+  sel = (i>=0 && i<trials.length) ? i : trials.length-1;
+  const rows = trials.map((t,k)=>`<tr class="${k===sel?"sel":""}"><td class="l">${k+1}</td><td class="l">${t.cond}</td><td>${t.freq.toFixed(2)}</td><td>${Math.round(t.ampCm)}</td><td>${fmt(t.actualDur,0)}</td>
+    <td>${fmt(t.analysis.apRms,2)}</td><td>${fmt(t.analysis.headAtF,2)}</td><td>${t.analysis.gain===null?"—":fmt(t.analysis.gain,2)}</td>
+    <td><button data-v="${k}" style="padding:5px 10px;font-size:14px">Show</button></td></tr>`).join("");
+  const t = trials[sel], A = t.analysis;
+  $("results").innerHTML = `
+    <table><thead><tr><th class="l">Trial</th><th class="l">Condition</th><th>Freq (Hz)</th><th>Room amp (cm)</th><th>Length (s)</th><th>Head sway, RMS (cm)</th><th>Head sway at room freq (cm)</th><th>Gain</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <h2 style="margin-top:22px;font-size:18px">Trial ${sel+1}: ${t.cond}, ${t.freq.toFixed(2)} Hz, ${Math.round(t.ampCm)} cm</h2>
+    <div class="stats">
+      <div class="stat"><div class="v">${fmt(A.apRms,2)} cm</div><div class="k">Forward–backward head sway (RMS)</div></div>
+      <div class="stat"><div class="v">${fmt(A.headAtF,2)} cm</div><div class="k">Head sway at the room’s frequency</div></div>
+      <div class="stat"><div class="v">${A.gain===null?"—":fmt(A.gain,2)}</div><div class="k">Gain (head ÷ room at that frequency)</div></div>
+      <div class="stat"><div class="v">${A.lagDeg===null?"—":fmt(A.lagDeg,0)+"°"}</div><div class="k">Phase lag of head behind room</div></div>
+    </div>
+    <div class="legend"><span><i style="background:#8a8984"></i>Room position (+ = moved forward, away)</span><span><i style="background:#2a78d6"></i>Head position (+ = forward)</span></div>
+    <div id="plot"></div>
+    <p class="small muted">The first 5 s (while the room ramps up) are left out of the numbers. Sampling rate ≈ ${fmt(A.hz,0)} Hz. If the body follows the room, the blue trace rises and falls with the gray one: the body sways in the same direction the walls move.</p>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="bCsvT">Download this trial (CSV)</button>
+      <button id="bCsvAll">Download summary of all trials (CSV)</button>
+      <button id="bCopy">Copy summary</button>
+      <button class="danger" id="bClear">Delete all trials…</button>
+    </div>
+    <p class="small muted" id="msg"></p><textarea id="fallback"></textarea>`;
+  document.querySelectorAll("[data-v]").forEach(b => b.onclick = () => showResults(+b.dataset.v));
+  drawPlot($("plot"), t);
+  $("bCsvT").onclick = () => download(`moving_room_trial${sel+1}.csv`, "time_ms,head_ap_mm,head_ml_mm,head_height_mm,room_ap_mm\n" + t.samples.map(r=>r.join(",")).join("\n"));
+  $("bCsvAll").onclick = () => download(`moving_room_summary.csv`, summaryCSV());
+  $("bCopy").onclick = () => { const txt = summaryCSV(); try { navigator.clipboard.writeText(txt).then(()=>$("msg").textContent="Copied.", ()=>fb(txt)); } catch(e){ fb(txt); } };
+  $("bClear").onclick = e => { const b = e.target; if (!b.dataset.armed){ b.dataset.armed="1"; b.textContent="Tap again to delete all"; setTimeout(()=>{ b.textContent="Delete all trials…"; delete b.dataset.armed; },3000); return; }
+    trials = []; saveTrials(); showResults(-1); };
+}
+function fb(txt){ const f = $("fallback"); f.style.display="block"; f.value = txt; f.select(); $("msg").textContent = "Select the text below and copy it."; }
+function summaryCSV(){
+  const h = "trial,condition,freq_hz,room_amp_cm,length_s,head_ap_rms_cm,head_ml_rms_cm,head_at_room_freq_cm,room_at_room_freq_cm,gain,phase_lag_deg,started";
+  return h + "\n" + trials.map((t,k)=>[k+1, `"${t.cond}"`, t.freq, t.ampCm, fmt(t.actualDur,1), fmt(t.analysis.apRms,3), fmt(t.analysis.mlRms,3), fmt(t.analysis.headAtF,3),
+    fmt(t.analysis.roomAtF,3), t.analysis.gain===null?"":fmt(t.analysis.gain,3), t.analysis.lagDeg===null?"":fmt(t.analysis.lagDeg,1), t.startedAt].join(",")).join("\n");
+}
+function download(name, text){ try { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text],{type:"text/csv"})); a.download = name; document.body.appendChild(a); a.click(); a.remove(); } catch(e){ fb(text); } }
+
+function drawPlot(el, t){
+  const W = 960, Hp = 150, gap = 26, m = {l:58, r:16, t:10, b:34}, H = m.t + Hp*2 + gap + m.b;
+  const sm = t.samples; if (!sm.length){ el.innerHTML=""; return; }
+  const T = sm[sm.length-1][0]/1000;
+  const X = s => m.l + s/T*(W-m.l-m.r);
+  const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
+  const apMean = mean(sm.map(r=>r[1]));
+  const room = sm.map(r=>[r[0]/1000, r[4]/10]), head = sm.map(r=>[r[0]/1000, (r[1]-apMean)/10]);
+  const lim = a => { const v = Math.max(1, ...a.map(p=>Math.abs(p[1]))); const st = v<=2?0.5:v<=5?1:v<=10?2:v<=25?5:10; return Math.ceil(v/st)*st; };
+  const panel = (data, y0, color, label) => {
+    const L = lim(data), Y = v => y0 + Hp/2 - v/L*(Hp/2);
+    let g = `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="#c9c8c3"/>`;
+    [L, -L].forEach(v => g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#f0efeb"/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="12" fill="#8a8984">${v>0?"+":""}${v}</text>`);
+    g += `<text x="${m.l-8}" y="${Y(0)+4}" text-anchor="end" font-size="12" fill="#8a8984">0</text>`;
+    const step = Math.max(1, Math.floor(data.length/1500));
+    g += `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" points="${data.filter((_,i)=>i%step===0).map(([s,v])=>`${X(s).toFixed(1)},${Y(v).toFixed(1)}`).join(" ")}"/>`;
+    g += `<text x="${m.l+6}" y="${y0+14}" font-size="13" fill="#52514e">${label}</text>`;
+    return g;
+  };
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Room position and head sway over time">`;
+  for (let s=0; s<=T; s+= T>90?20:10) svg += `<line x1="${X(s)}" x2="${X(s)}" y1="${m.t}" y2="${m.t+Hp*2+gap}" stroke="#f5f4f1"/><text x="${X(s)}" y="${H-m.b+18}" text-anchor="middle" font-size="12" fill="#8a8984">${s}</text>`;
+  svg += panel(room, m.t, "#8a8984", "Room position (cm)") + panel(head, m.t+Hp+gap, "#2a78d6", "Head forward–backward (cm)");
+  svg += `<text x="${(m.l+W-m.r)/2}" y="${H-4}" text-anchor="middle" font-size="13" fill="#52514e">Time (s)</text></svg>`;
+  el.innerHTML = svg;
+}
+
+/* ---------------- startup ---------------- */
+async function checkXR(){
+  const st = $("xrStatus");
+  if (!window.isSecureContext){ st.innerHTML = `<span class="flag-warn">This page must be opened from an https:// address for VR to work.</span>`; return; }
+  if (!navigator.xr){ st.innerHTML = `<span class="flag-warn">VR is not available in this browser.</span> Open this page in the Meta Quest Browser. You can still use <b>Preview on this screen</b>.`; return; }
+  try {
+    const ok = await navigator.xr.isSessionSupported("immersive-vr");
+    if (ok){ $("bVR").disabled = false; st.innerHTML = `<span class="flag-ok">✓ VR is available.</span> Put on the headset and press <b>Enter VR</b>.`; }
+    else st.innerHTML = `<span class="flag-warn">No VR headset detected.</span> Open this page in the Meta Quest Browser. You can still use <b>Preview on this screen</b>.`;
+  } catch(e){ st.innerHTML = `<span class="flag-warn">VR check failed (${e.message}).</span> If this page is embedded in another page, open it directly instead.`; }
+}
+checkXR();
+showResults(trials.length-1);
+window.__vr = { analyze, fitSine, trials: () => trials, setTrials: t => { trials = t; showResults(t.length-1); } };   // for testing
+</script>
+</body>
+</html>
